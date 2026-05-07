@@ -225,20 +225,73 @@ export default function Index() {
     if (!canvas) return;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
-    const W = canvas.width, H = canvas.height;
 
-    ctx.clearRect(0, 0, W, H);
+    if (!otFontRef.current || !text) {
+      ctx.fillStyle = bgColor;
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      return;
+    }
+
+    const font = otFontRef.current;
+    const scale = fontSize / font.unitsPerEm;
+    const lineHeight = (font.ascender - font.descender) * scale * 1.3;
+    const PAD = 48;
+
+    // Разбиваем текст на строки по переносам и по ширине канваса
+    const W = canvas.width;
+    const maxLineWidth = W - PAD * 2;
+
+    const rawLines = text.split("\n");
+    const lines: string[] = [];
+
+    for (const rawLine of rawLines) {
+      const words = rawLine.split(" ");
+      let current = "";
+      for (const word of words) {
+        const test = current ? current + " " + word : word;
+        const testWidth = font.getAdvanceWidth(test, fontSize);
+        if (testWidth > maxLineWidth && current) {
+          lines.push(current);
+          current = word;
+        } else {
+          current = test;
+        }
+      }
+      if (current) lines.push(current);
+      if (rawLine === "" ) lines.push("");
+    }
+
+    // Пересчитываем высоту канваса под количество строк
+    const neededH = Math.max(200, lines.length * lineHeight + PAD * 2);
+    if (canvas.height !== neededH) {
+      canvas.height = neededH;
+    }
+    const H = canvas.height;
+
     ctx.fillStyle = bgColor;
     ctx.fillRect(0, 0, W, H);
 
-    if (!otFontRef.current || !text) return;
+    // Рисуем каждую строку
+    const totalCharsAll = text.replace(/\n/g, " ").length;
+    let charsDrawn = 0;
+    const charsTarget = Math.floor(totalCharsAll * p);
 
-    // Центрируем по X
-    const scale = fontSize / otFontRef.current.unitsPerEm;
-    const textWidth = otFontRef.current.getAdvanceWidth(text, fontSize);
-    const startX = Math.max(32, (W - textWidth) / 2);
+    for (let li = 0; li < lines.length; li++) {
+      const line = lines[li];
+      if (!line) { charsDrawn++; continue; }
 
-    drawHandwriting(ctx, otFontRef.current, text, startX, H / 2 + (otFontRef.current.ascender * scale) / 2, fontSize, p, strokeColor, strokeWidth, glowEnabled);
+      const lineWidth = font.getAdvanceWidth(line, fontSize);
+      const startX = Math.max(PAD, (W - lineWidth) / 2);
+      const startY = PAD + li * lineHeight + (font.ascender * scale);
+
+      const charsLeft = charsTarget - charsDrawn;
+      if (charsLeft <= 0) break;
+
+      const lineProgress = Math.min(charsLeft / line.length, 1);
+
+      drawHandwriting(ctx, font, line, startX, startY - (font.ascender * scale) / 2, fontSize, lineProgress, strokeColor, strokeWidth, glowEnabled);
+      charsDrawn += line.length;
+    }
   }, [text, fontSize, strokeColor, strokeWidth, bgColor, glowEnabled]);
 
   useEffect(() => {
@@ -467,11 +520,11 @@ export default function Index() {
               </p>
             </div>
 
-            <div className="gradient-border rounded-2xl overflow-hidden mx-auto max-w-3xl">
-              <canvas ref={canvasRef} width={800} height={400} className="w-full block" />
+            <div className="gradient-border rounded-2xl overflow-auto">
+              <canvas ref={canvasRef} width={1000} height={400} className="w-full block" />
             </div>
 
-            <div className="max-w-3xl mx-auto">
+            <div>
               <div className="h-1 bg-white/10 rounded-full overflow-hidden">
                 <div className="h-full rounded-full transition-all duration-75"
                   style={{ width: `${progress}%`, background: `linear-gradient(90deg, ${strokeColor}, #38bdf8)`, boxShadow: `0 0 10px ${strokeColor}88` }} />
@@ -493,7 +546,7 @@ export default function Index() {
               </button>
             </div>
 
-            <div className="max-w-3xl mx-auto glass rounded-2xl p-5 grid grid-cols-2 sm:grid-cols-4 gap-4">
+            <div className="glass rounded-2xl p-5 grid grid-cols-2 sm:grid-cols-5 gap-4">
               <div>
                 <p className="text-xs text-muted-foreground mb-2 text-center">Скорость</p>
                 <input type="range" min={1} max={99} value={speed} onChange={(e) => setSpeed(Number(e.target.value))} className="w-full" />
