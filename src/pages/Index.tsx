@@ -57,35 +57,40 @@ export default function Index() {
 
     ctx.font = `${fontSize}px '${selectedFont}'`;
     ctx.textBaseline = "middle";
-    ctx.textAlign = "center";
+    ctx.textAlign = "left";
+
+    // Вычисляем стартовую X так, чтобы полный текст оказался по центру
+    const fullWidth = ctx.measureText(text).width;
+    const startX = Math.max(40, (W - fullWidth) / 2);
+    const startY = H / 2;
 
     const totalChars = Math.ceil(text.length * animProgress);
     const displayText = text.slice(0, totalChars);
 
-    // Glow effect
+    // Glow + основной текст
     ctx.shadowColor = strokeColor;
     ctx.shadowBlur = 20;
     ctx.fillStyle = strokeColor;
+    ctx.globalAlpha = 1;
+
     if (displayText) {
-      // Draw with fading last char
       if (animProgress < 1 && totalChars > 0) {
-        const lastCharProgress = (text.length * animProgress) - (totalChars - 1);
+        // Полностью отрисованная часть
         const fullPart = text.slice(0, totalChars - 1);
         const lastChar = text[totalChars - 1] || "";
+        const lastCharProgress = (text.length * animProgress) - (totalChars - 1);
 
-        ctx.globalAlpha = 1;
-        if (fullPart) ctx.fillText(fullPart, W / 2, H / 2);
+        if (fullPart) ctx.fillText(fullPart, startX, startY);
 
+        // Последний символ появляется плавно на своей позиции
         if (lastChar) {
-          ctx.globalAlpha = Math.min(lastCharProgress * 3, 1);
-          const fullMetrics = ctx.measureText(fullPart);
-          const fullWithLast = ctx.measureText(fullPart + lastChar);
-          const offset = (fullWithLast.width - fullMetrics.width) / 2;
-          ctx.fillText(fullPart + lastChar, W / 2, H / 2);
+          const partWidth = ctx.measureText(fullPart).width;
+          ctx.globalAlpha = Math.min(lastCharProgress * 2.5, 1);
+          ctx.fillText(lastChar, startX + partWidth, startY);
           ctx.globalAlpha = 1;
         }
       } else {
-        ctx.fillText(displayText, W / 2, H / 2);
+        ctx.fillText(displayText, startX, startY);
       }
     }
 
@@ -95,8 +100,8 @@ export default function Index() {
     // Subtle stroke
     ctx.strokeStyle = strokeColor;
     ctx.lineWidth = strokeWidth * 0.25;
-    ctx.globalAlpha = 0.25;
-    if (displayText) ctx.strokeText(displayText, W / 2, H / 2);
+    ctx.globalAlpha = 0.2;
+    if (displayText) ctx.strokeText(displayText, startX, startY);
     ctx.globalAlpha = 1;
   }, [text, fontSize, strokeColor, strokeWidth, bgColor, selectedFont]);
 
