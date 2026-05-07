@@ -73,7 +73,8 @@ function drawHandwriting(
   fontSize: number,
   progress: number,
   color: string,
-  lineWidth: number
+  lineWidth: number,
+  glowEnabled: boolean
 ) {
   const scale = fontSize / font.unitsPerEm;
   const baseline = y - (font.descender * scale);
@@ -131,7 +132,6 @@ function drawHandwriting(
 
   // Считаем общее число точек
   const totalPoints = allSegments.reduce((s, seg) => s + seg.points.length, 0);
-  const drawPoints = Math.floor(totalPoints * progress);
 
   // Рисуем
   ctx.save();
@@ -139,15 +139,22 @@ function drawHandwriting(
   ctx.lineWidth = lineWidth;
   ctx.lineCap = "round";
   ctx.lineJoin = "round";
-  ctx.shadowColor = color;
-  ctx.shadowBlur = 8;
+  if (glowEnabled) {
+    ctx.shadowColor = color;
+    ctx.shadowBlur = 8;
+  } else {
+    ctx.shadowBlur = 0;
+  }
+
+  // Всегда рисуем штрихами — и в процессе, и в конце
+  const drawCount = progress >= 1 ? totalPoints : Math.floor(totalPoints * progress);
 
   let drawn = 0;
   outer: for (const seg of allSegments) {
-    if (drawn >= drawPoints) break;
+    if (drawn >= drawCount) break;
     ctx.beginPath();
     for (let pi = 0; pi < seg.points.length; pi++) {
-      if (drawn >= drawPoints) {
+      if (drawn >= drawCount) {
         ctx.stroke();
         break outer;
       }
@@ -157,17 +164,6 @@ function drawHandwriting(
       drawn++;
     }
     ctx.stroke();
-  }
-
-  // При полном прогрессе — заливаем тоже
-  if (progress >= 1) {
-    ctx.shadowBlur = 14;
-    ctx.fillStyle = color;
-    ctx.globalAlpha = 0.92;
-    const fullPath = font.getPath(text, x, baseline, fontSize);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    fullPath.draw(ctx as any);
-    ctx.globalAlpha = 1;
   }
 
   ctx.restore();
@@ -188,6 +184,7 @@ export default function Index() {
   const [uploadedFontUrl, setUploadedFontUrl] = useState<string | null>(null);
   const [selectedFont, setSelectedFont] = useState("Caveat");
   const [fontLoading, setFontLoading] = useState(false);
+  const [glowEnabled, setGlowEnabled] = useState(true);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const animationRef = useRef<number>(0);
   const fontFileRef = useRef<HTMLInputElement>(null);
@@ -241,8 +238,8 @@ export default function Index() {
     const textWidth = otFontRef.current.getAdvanceWidth(text, fontSize);
     const startX = Math.max(32, (W - textWidth) / 2);
 
-    drawHandwriting(ctx, otFontRef.current, text, startX, H / 2 + (otFontRef.current.ascender * scale) / 2, fontSize, p, strokeColor, strokeWidth);
-  }, [text, fontSize, strokeColor, strokeWidth, bgColor]);
+    drawHandwriting(ctx, otFontRef.current, text, startX, H / 2 + (otFontRef.current.ascender * scale) / 2, fontSize, p, strokeColor, strokeWidth, glowEnabled);
+  }, [text, fontSize, strokeColor, strokeWidth, bgColor, glowEnabled]);
 
   useEffect(() => {
     if (activeTab === "preview") {
@@ -411,6 +408,17 @@ export default function Index() {
                   </div>
                   <input type="range" min={1} max={10} value={strokeWidth} onChange={(e) => setStrokeWidth(Number(e.target.value))} className="w-full" />
                 </div>
+                {/* Glow toggle */}
+                <div className="flex items-center justify-between py-1">
+                  <span className="text-sm text-muted-foreground">Неоновое свечение</span>
+                  <button
+                    onClick={() => setGlowEnabled((v) => !v)}
+                    className={`relative w-11 h-6 rounded-full transition-colors duration-300 ${glowEnabled ? "bg-purple-600" : "bg-white/10"}`}
+                  >
+                    <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform duration-300 ${glowEnabled ? "translate-x-5" : "translate-x-0"}`} />
+                  </button>
+                </div>
+
                 <div className="flex gap-4">
                   <div className="flex-1">
                     <span className="text-sm text-muted-foreground block mb-2">Цвет текста</span>
@@ -511,6 +519,15 @@ export default function Index() {
                   <input type="color" value={bgColor} onChange={(e) => setBgColor(e.target.value)} className="absolute inset-0 w-full h-full cursor-pointer opacity-0" />
                   <div className="absolute inset-0 rounded-xl" style={{ backgroundColor: bgColor }} />
                 </div>
+              </div>
+              <div className="flex flex-col items-center justify-center gap-2">
+                <p className="text-xs text-muted-foreground">Свечение</p>
+                <button
+                  onClick={() => setGlowEnabled((v) => !v)}
+                  className={`relative w-11 h-6 rounded-full transition-colors duration-300 ${glowEnabled ? "bg-purple-600" : "bg-white/10"}`}
+                >
+                  <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform duration-300 ${glowEnabled ? "translate-x-5" : "translate-x-0"}`} />
+                </button>
               </div>
             </div>
           </div>
