@@ -206,7 +206,9 @@ export default function Index() {
     if (!fontUrl) return;
     setFontLoading(true);
     try {
-      const font = await opentype.load(fontUrl);
+      const response = await fetch(fontUrl);
+      const buffer = await response.arrayBuffer();
+      const font = opentype.parse(buffer);
       otFontCache[cacheKey] = font;
       otFontRef.current = font;
     } finally {
