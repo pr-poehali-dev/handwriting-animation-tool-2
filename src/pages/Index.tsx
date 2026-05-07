@@ -22,9 +22,9 @@ const SAMPLE_PROJECTS: Project[] = [
 // Загруженные opentype-шрифты (кэш)
 const otFontCache: Record<string, opentype.Font> = {};
 
-// URL встроенных шрифтов для opentype
+// URL встроенных шрифтов — только TTF, opentype.js не поддерживает woff2
 const BUILTIN_FONT_URLS: Record<string, string> = {
-  "Caveat": "https://fonts.gstatic.com/s/caveat/v18/WnznHAc5bAfYB2QRah7pcpNvOx-pjcB9eIWpZA.woff",
+  "Caveat": "https://raw.githubusercontent.com/google/fonts/main/ofl/caveat/Caveat%5Bwght%5D.ttf",
 };
 
 // Разбить Path на отдельные сегменты-команды и извлечь координаты точек
@@ -207,10 +207,13 @@ export default function Index() {
     setFontLoading(true);
     try {
       const response = await fetch(fontUrl);
+      if (!response.ok) throw new Error(`Font fetch failed: ${response.status} ${fontUrl}`);
       const buffer = await response.arrayBuffer();
       const font = opentype.parse(buffer);
       otFontCache[cacheKey] = font;
       otFontRef.current = font;
+    } catch (e) {
+      console.error("Font load error:", e);
     } finally {
       setFontLoading(false);
     }
