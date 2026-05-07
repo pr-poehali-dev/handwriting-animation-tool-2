@@ -27,6 +27,15 @@ const BUILTIN_FONT_URLS: Record<string, string> = {
   "Caveat": "https://raw.githubusercontent.com/google/fonts/main/ofl/caveat/Caveat%5Bwght%5D.ttf",
 };
 
+// Форматы канваса в Full HD
+type AspectRatio = "16:9" | "9:16" | "4:3" | "1:1";
+const CANVAS_FORMATS: Record<AspectRatio, { w: number; h: number; label: string }> = {
+  "16:9":  { w: 1920, h: 1080, label: "16:9  Горизонт." },
+  "9:16":  { w: 1080, h: 1920, label: "9:16  Вертикаль" },
+  "4:3":   { w: 1440, h: 1080, label: "4:3   Классика" },
+  "1:1":   { w: 1080, h: 1080, label: "1:1   Квадрат" },
+};
+
 // Разбить Path на отдельные сегменты-команды и извлечь координаты точек
 function getPathPoints(path: opentype.Path): {x: number; y: number}[] {
   const points: {x: number; y: number}[] = [];
@@ -185,7 +194,9 @@ export default function Index() {
   const [selectedFont, setSelectedFont] = useState("Caveat");
   const [fontLoading, setFontLoading] = useState(false);
   const [glowEnabled, setGlowEnabled] = useState(true);
+  const [aspectRatio, setAspectRatio] = useState<AspectRatio>("16:9");
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const previewCanvasRef = useRef<HTMLCanvasElement>(null);
   const animationRef = useRef<number>(0);
   const fontFileRef = useRef<HTMLInputElement>(null);
   const otFontRef = useRef<opentype.Font | null>(null);
@@ -220,37 +231,34 @@ export default function Index() {
     loadOtFont(selectedFont, selectedFont === uploadedFontName ? (uploadedFontUrl ?? undefined) : undefined);
   }, [selectedFont, uploadedFontName, uploadedFontUrl, loadOtFont]);
 
-  const drawFrame = useCallback((p: number) => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
+  // Единый рендер — рисует на любой канвас с нужными размерами
+  const renderToCanvas = useCallback((canvas: HTMLCanvasElement, p: number) => {
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
+    const W = canvas.width;
+    const H = canvas.height;
 
-    if (!otFontRef.current || !text) {
-      ctx.fillStyle = bgColor;
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-      return;
-    }
+    ctx.fillStyle = bgColor;
+    ctx.fillRect(0, 0, W, H);
+
+    if (!otFontRef.current || !text) return;
 
     const font = otFontRef.current;
     const scale = fontSize / font.unitsPerEm;
-    const lineHeight = (font.ascender - font.descender) * scale * 1.3;
-    const PAD = 48;
+    const lineHeight = (font.ascender - font.descender) * scale * 1.35;
+    const PAD = Math.round(W * 0.04);
 
-    // Разбиваем текст на строки по переносам и по ширине канваса
-    const W = canvas.width;
     const maxLineWidth = W - PAD * 2;
-
     const rawLines = text.split("\n");
     const lines: string[] = [];
 
     for (const rawLine of rawLines) {
+      if (rawLine === "") { lines.push(""); continue; }
       const words = rawLine.split(" ");
       let current = "";
       for (const word of words) {
         const test = current ? current + " " + word : word;
-        const testWidth = font.getAdvanceWidth(test, fontSize);
-        if (testWidth > maxLineWidth && current) {
+        if (font.getAdvanceWidth(test, fontSize) > maxLineWidth && current) {
           lines.push(current);
           current = word;
         } else {
@@ -258,47 +266,63 @@ export default function Index() {
         }
       }
       if (current) lines.push(current);
-      if (rawLine === "" ) lines.push("");
     }
 
-    // Пересчитываем высоту канваса под количество строк
-    const neededH = Math.max(200, lines.length * lineHeight + PAD * 2);
-    if (canvas.height !== neededH) {
-      canvas.height = neededH;
-    }
-    const H = canvas.height;
+    // Вертикальное центрирование блока текста
+    const totalTextH = lines.length * lineHeight;
+    const blockStartY = Math.max(PAD, (H - totalTextH) / 2);
 
-    ctx.fillStyle = bgColor;
-    ctx.fillRect(0, 0, W, H);
-
-    // Рисуем каждую строку
-    const totalCharsAll = text.replace(/\n/g, " ").length;
+    const totalChars = text.replace(/\n/g, "").length;
     let charsDrawn = 0;
-    const charsTarget = Math.floor(totalCharsAll * p);
+    const charsTarget = Math.floor(totalChars * p);
 
     for (let li = 0; li < lines.length; li++) {
       const line = lines[li];
-      if (!line) { charsDrawn++; continue; }
-
-      const lineWidth = font.getAdvanceWidth(line, fontSize);
-      const startX = Math.max(PAD, (W - lineWidth) / 2);
-      const startY = PAD + li * lineHeight + (font.ascender * scale);
+      if (!line) continue;
 
       const charsLeft = charsTarget - charsDrawn;
       if (charsLeft <= 0) break;
 
+      const lineW = font.getAdvanceWidth(line, fontSize);
+      const startX = Math.max(PAD, (W - lineW) / 2);
+      const startY = blockStartY + li * lineHeight + (font.ascender * scale * 0.5);
       const lineProgress = Math.min(charsLeft / line.length, 1);
 
-      drawHandwriting(ctx, font, line, startX, startY - (font.ascender * scale) / 2, fontSize, lineProgress, strokeColor, strokeWidth, glowEnabled);
+      drawHandwriting(ctx, font, line, startX, startY, fontSize, lineProgress, strokeColor, strokeWidth, glowEnabled);
       charsDrawn += line.length;
     }
   }, [text, fontSize, strokeColor, strokeWidth, bgColor, glowEnabled]);
 
+  const drawFrame = useCallback((p: number) => {
+    const canvas = canvasRef.current;
+    if (canvas) renderToCanvas(canvas, p);
+    // Синхронно обновляем превью в редакторе
+    const preview = previewCanvasRef.current;
+    if (preview) renderToCanvas(preview, 1);
+  }, [renderToCanvas]);
+
+  // Обновляем превью-канвас в редакторе при любом изменении
+  useEffect(() => {
+    const canvas = previewCanvasRef.current;
+    if (!canvas) return;
+    const fmt = CANVAS_FORMATS[aspectRatio];
+    canvas.width = fmt.w;
+    canvas.height = fmt.h;
+    renderToCanvas(canvas, 1);
+  }, [renderToCanvas, aspectRatio]);
+
+  // При открытии превью-вкладки — синхронизируем размер и рисуем
   useEffect(() => {
     if (activeTab === "preview") {
-      setTimeout(() => drawFrame(1), 80);
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      const fmt = CANVAS_FORMATS[aspectRatio];
+      canvas.width = fmt.w;
+      canvas.height = fmt.h;
+      setTimeout(() => renderToCanvas(canvas, 1), 60);
     }
-  }, [activeTab, drawFrame]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, aspectRatio]);
 
   const startAnimation = () => {
     if (isAnimating) {
@@ -306,6 +330,13 @@ export default function Index() {
       setIsAnimating(false);
       drawFrame(1);
       return;
+    }
+    // Убеждаемся что размер канваса актуален
+    const canvas = canvasRef.current;
+    if (canvas) {
+      const fmt = CANVAS_FORMATS[aspectRatio];
+      canvas.width = fmt.w;
+      canvas.height = fmt.h;
     }
     setIsAnimating(true);
     setProgress(0);
@@ -404,24 +435,54 @@ export default function Index() {
         {activeTab === "editor" && (
           <div className="grid grid-cols-1 lg:grid-cols-5 gap-6 mt-6 animate-fade-in">
             <div className="lg:col-span-3 space-y-4">
-              <div className="gradient-border rounded-2xl p-6 space-y-4">
+              <div className="gradient-border rounded-2xl p-5 space-y-3">
                 <div className="flex items-center justify-between">
                   <h2 className="font-unbounded text-xs font-semibold tracking-widest text-purple-400 uppercase">Текст</h2>
                   <span className="text-xs text-muted-foreground">{text.length} символов</span>
                 </div>
                 <textarea value={text} onChange={(e) => setText(e.target.value)} placeholder="Введите текст..."
-                  className="w-full h-28 bg-transparent border-none outline-none resize-none text-foreground placeholder:text-muted-foreground/40 text-lg leading-relaxed"
-                  style={{ fontFamily: selectedFont, fontSize: `${Math.min(fontSize, 28)}px` }} />
+                  className="w-full h-28 bg-transparent border-none outline-none resize-none text-foreground placeholder:text-muted-foreground/40 text-base leading-relaxed"
+                  style={{ fontFamily: selectedFont }} />
               </div>
-              <div className="gradient-border rounded-2xl min-h-[180px] flex items-center justify-center p-8 overflow-hidden" style={{ backgroundColor: bgColor }}>
-                <p className="text-center select-none transition-all duration-300 break-all"
-                  style={{ fontFamily: selectedFont, fontSize: `clamp(24px, ${fontSize * 0.5}px, 72px)`, color: strokeColor, textShadow: `0 0 20px ${strokeColor}88, 0 0 40px ${strokeColor}44`, lineHeight: 1.2 }}>
-                  {text || "Ваш текст здесь"}
-                </p>
+
+              {/* Превью — тот же канвас что и в анимации */}
+              <div className="gradient-border rounded-xl overflow-hidden">
+                <div className="relative w-full" style={{ aspectRatio: `${CANVAS_FORMATS[aspectRatio].w} / ${CANVAS_FORMATS[aspectRatio].h}` }}>
+                  <canvas
+                    ref={previewCanvasRef}
+                    width={CANVAS_FORMATS[aspectRatio].w}
+                    height={CANVAS_FORMATS[aspectRatio].h}
+                    className="absolute inset-0 w-full h-full block"
+                  />
+                  {fontLoading && (
+                    <div className="absolute inset-0 flex items-center justify-center bg-black/40">
+                      <div className="flex items-center gap-2 text-sm text-purple-300">
+                        <Icon name="Loader" size={16} className="animate-spin" />
+                        Загрузка шрифта...
+                      </div>
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
 
             <div className="lg:col-span-2 space-y-4">
+              {/* Формат */}
+              <div className="glass rounded-2xl p-5 glass-hover">
+                <h3 className="font-unbounded text-xs tracking-widest text-green-400 uppercase mb-3">Формат</h3>
+                <div className="grid grid-cols-2 gap-2">
+                  {(Object.keys(CANVAS_FORMATS) as AspectRatio[]).map((fmt) => (
+                    <button key={fmt} onClick={() => setAspectRatio(fmt)}
+                      className={`py-2 px-3 rounded-xl text-xs font-medium transition-all ${aspectRatio === fmt ? "bg-purple-600 text-white" : "glass border border-white/10 text-muted-foreground hover:border-purple-500 hover:text-foreground"}`}>
+                      {CANVAS_FORMATS[fmt].label}
+                    </button>
+                  ))}
+                </div>
+                <p className="text-xs text-muted-foreground mt-2 text-center">
+                  {CANVAS_FORMATS[aspectRatio].w} × {CANVAS_FORMATS[aspectRatio].h} px
+                </p>
+              </div>
+
               <div className="glass rounded-2xl p-5 glass-hover">
                 <h3 className="font-unbounded text-xs tracking-widest text-blue-400 uppercase mb-4">Шрифт</h3>
                 <select value={selectedFont} onChange={(e) => setSelectedFont(e.target.value)}
@@ -512,16 +573,35 @@ export default function Index() {
 
         {/* PREVIEW */}
         {activeTab === "preview" && (
-          <div className="space-y-6 mt-6 animate-fade-in">
-            <div className="text-center space-y-2">
-              <h2 className="font-unbounded font-semibold text-xl shimmer-text">Анимация письма</h2>
-              <p className="text-muted-foreground text-sm">
-                {fontLoading ? "Загрузка шрифта..." : "Нажмите «Воспроизвести» чтобы увидеть эффект рукописного письма"}
+          <div className="space-y-4 mt-6 animate-fade-in">
+            {/* Тулбар превью */}
+            <div className="flex items-center justify-between flex-wrap gap-3">
+              <div className="flex items-center gap-2">
+                {(Object.keys(CANVAS_FORMATS) as AspectRatio[]).map((fmt) => (
+                  <button key={fmt} onClick={() => setAspectRatio(fmt)}
+                    className={`py-1.5 px-3 rounded-lg text-xs font-medium transition-all ${aspectRatio === fmt ? "bg-purple-600 text-white" : "glass border border-white/10 text-muted-foreground hover:border-purple-400"}`}>
+                    {fmt}
+                  </button>
+                ))}
+                <span className="text-xs text-muted-foreground ml-1">
+                  {CANVAS_FORMATS[aspectRatio].w}×{CANVAS_FORMATS[aspectRatio].h}
+                </span>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                {fontLoading ? "⏳ Загрузка шрифта..." : "Full HD · нажмите ▶ для анимации"}
               </p>
             </div>
 
-            <div className="gradient-border rounded-2xl overflow-auto">
-              <canvas ref={canvasRef} width={1000} height={400} className="w-full block" />
+            {/* Канвас — масштабируется CSS, но рендерится в Full HD */}
+            <div className="gradient-border rounded-xl overflow-hidden w-full">
+              <div className="relative w-full" style={{ aspectRatio: `${CANVAS_FORMATS[aspectRatio].w} / ${CANVAS_FORMATS[aspectRatio].h}` }}>
+                <canvas
+                  ref={canvasRef}
+                  width={CANVAS_FORMATS[aspectRatio].w}
+                  height={CANVAS_FORMATS[aspectRatio].h}
+                  className="absolute inset-0 w-full h-full block"
+                />
+              </div>
             </div>
 
             <div>
